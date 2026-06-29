@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Word Forensics Engine</title>
+  
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <link rel="stylesheet" href="https://res-1.cdn.office.net/files/fabric-cdn-prod_20230815.002/office-ui-fabric-core/11.1.0/css/fabric.min.css"/>
+  <link href="taskpane.css" rel="stylesheet" />
+</head>
+
+<body class="ms-Fabric">
+  
+  <header class="ms-bgColor-neutralLighter ms-fontColor-neutralPrimary" style="padding: 16px;">
+    <h2 class="ms-font-xl ms-fontWeight-semibold">📄 Word Forensics Engine</h2>
+  </header>
+
+  <main id="app-body" style="padding: 16px; display:none;">
+    
+    <div class="ms-Grid-col ms-sm12">
+      <button id="analyze-button" class="ms-Button ms-Button--primary">
+        <span class="ms-Button-label">Analyze Document</span>
+      </button>
+      <button id="export-btn" class="ms-Button ms-Button--default" style="margin-left: 8px;">
+        <span class="ms-Button-label">Export Report</span>
+      </button>
+    </div>
+
+    <hr class="ms-borderColor-neutralTertiary" style="margin: 20px 0;" />
+
+    <div class="ms-Grid" dir="ltr">
+      <div class="ms-Grid-row">
+        <div class="ms-Grid-col ms-sm6">
+          <div class="ms-font-m-plus ms-fontWeight-semibold">Words</div>
+          <div id="word-count" class="ms-font-xxl">0</div>
+        </div>
+        <div class="ms-Grid-col ms-sm6">
+          <div class="ms-font-m-plus ms-fontWeight-semibold">Paragraphs</div>
+          <div id="paragraph-count" class="ms-font-xxl">0</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="report-container" style="margin-top: 20px;"></div>
+
+  </main>
+</body>
+</html>
