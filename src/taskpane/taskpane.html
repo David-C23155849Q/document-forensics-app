@@ -1,49 +1,126 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Word Forensics Engine</title>
-  
-  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <link rel="stylesheet" href="https://res-1.cdn.office.net/files/fabric-cdn-prod_20230815.002/office-ui-fabric-core/11.1.0/css/fabric.min.css"/>
-  <link href="taskpane.css" rel="stylesheet" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Word Forensics Engine</title>
+
+    <!-- Office JS -->
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+
+    <!-- Fluent UI -->
+    <link rel="stylesheet"
+        href="https://res-1.cdn.office.net/files/fabric-cdn-prod_20230815.002/office-ui-fabric-core/11.1.0/css/fabric.min.css" />
+
+    <link href="taskpane.css" rel="stylesheet" />
 </head>
 
 <body class="ms-Fabric">
-  
-  <header class="ms-bgColor-neutralLighter ms-fontColor-neutralPrimary" style="padding: 16px;">
-    <h2 class="ms-font-xl ms-fontWeight-semibold">📄 Word Forensics Engine</h2>
-  </header>
 
-  <main id="app-body" style="padding: 16px; display:none;">
-    
-    <div class="ms-Grid-col ms-sm12">
-      <button id="analyze-button" class="ms-Button ms-Button--primary">
-        <span class="ms-Button-label">Analyze Document</span>
-      </button>
-      <button id="export-btn" class="ms-Button ms-Button--default" style="margin-left: 8px;">
-        <span class="ms-Button-label">Export Report</span>
-      </button>
+    <!-- Hidden sideload message -->
+    <div id="sideload-msg" style="display:none;">
+        Loading...
     </div>
 
-    <hr class="ms-borderColor-neutralTertiary" style="margin: 20px 0;" />
+    <!-- Header -->
+    <header class="ms-bgColor-neutralLighter"
+        style="padding:18px;border-bottom:1px solid #ddd;">
 
-    <div class="ms-Grid" dir="ltr">
-      <div class="ms-Grid-row">
-        <div class="ms-Grid-col ms-sm6">
-          <div class="ms-font-m-plus ms-fontWeight-semibold">Words</div>
-          <div id="word-count" class="ms-font-xxl">0</div>
+        <h1 class="ms-font-xl" style="margin:0;">
+            📄 Word Forensics Engine
+        </h1>
+
+        <div style="color:#666;margin-top:5px;">
+            Live forensic monitoring & document analysis
         </div>
-        <div class="ms-Grid-col ms-sm6">
-          <div class="ms-font-m-plus ms-fontWeight-semibold">Paragraphs</div>
-          <div id="paragraph-count" class="ms-font-xxl">0</div>
+
+    </header>
+
+    <!-- Main -->
+    <main id="app-body" style="display:none;padding:20px;">
+
+        <div style="margin-bottom:15px;">
+
+            <button id="analyze-button"
+                class="ms-Button ms-Button--primary">
+                <span class="ms-Button-label">
+                    Analyze Document
+                </span>
+            </button>
+
+            <button id="export-btn"
+                class="ms-Button"
+                style="margin-left:10px;">
+                <span class="ms-Button-label">
+                    Export Report
+                </span>
+            </button>
+
         </div>
-      </div>
-    </div>
 
-    <div id="report-container" style="margin-top: 20px;"></div>
+        <hr>
 
-  </main>
+        <div style="display:flex;gap:20px;flex-wrap:wrap;">
+
+            <div style="flex:1;">
+                <b>Total Words</b>
+                <div id="word-count"
+                    style="font-size:28px;color:#0078D4;">
+                    0
+                </div>
+            </div>
+
+            <div style="flex:1;">
+                <b>Paragraphs</b>
+                <div id="paragraph-count"
+                    style="font-size:28px;color:#0078D4;">
+                    0
+                </div>
+            </div>
+
+            <div style="flex:1;">
+                <b>Risk Score</b>
+                <div id="forensic-alert"
+                    style="font-size:22px;font-weight:bold;color:green;">
+                    Waiting...
+                </div>
+            </div>
+
+        </div>
+
+        <hr>
+
+        <h3>Timeline</h3>
+
+        <div id="timeline-container"
+            style="max-height:180px;
+                   overflow:auto;
+                   border:1px solid #ddd;
+                   padding:10px;
+                   background:#fafafa;">
+
+            Waiting for monitoring...
+
+        </div>
+
+        <hr>
+
+        <h3>Analysis Report</h3>
+
+        <div id="report-container"
+            style="border:1px solid #ddd;
+                   border-radius:6px;
+                   padding:15px;
+                   min-height:220px;
+                   background:white;">
+
+            Click <b>Analyze Document</b> to generate a report.
+
+        </div>
+
+    </main>
+
 </body>
+
 </html>
