@@ -5,10 +5,19 @@
  */
 
 type Snapshot = {
-  time: number;
-  words: number;
-  paragraphCount: number;
-  text: string;
+    time: number;
+    words: number;
+    paragraphCount: number;
+    text: string;
+
+    fingerprint: string;
+
+    wordsAdded: number;
+    wordsDeleted: number;
+
+    typingSpeed: number;
+
+    suspicious: boolean;
 };
 
 type PasteEvent = {
@@ -19,8 +28,27 @@ type PasteEvent = {
     risk: string;
 };
 
+type EditingSession = {
+    started: string;
+    ended: string;
+
+    totalSnapshots: number;
+
+    totalWordsAdded: number;
+    totalWordsDeleted: number;
+
+    totalPasteEvents: number;
+
+    highestRisk: number;
+
+    averageTypingSpeed: number;
+
+    finalWordCount: number;
+};
+
 const timeline: Snapshot[] = [];
 const pasteEvents: PasteEvent[] = []; 
+const FORENSICS_NAMESPACE = "urn:word-forensics-engine";
 
 let lastSnapshot: Snapshot | null = null;
 let monitoring = false;
@@ -29,7 +57,7 @@ let lastTextHash = "";
 /**
  * APP START
  */
-Office.onReady(() => {
+Office.onReady(async () => {
   const sideloadMsg = document.getElementById("sideload-msg");
   const appBody = document.getElementById("app-body");
 
@@ -37,6 +65,8 @@ Office.onReady(() => {
   if (appBody) appBody.style.display = "block";
 
   console.log("Word Forensics Ready");
+
+  await loadMetadata();
 
   startMonitoring();
 
@@ -56,41 +86,151 @@ function startMonitoring() {
   }, 1200);
 }
 
+/*
+* function to load previuos data from last save if it does exist
+*/
+async function loadMetadata() {
+  await Word.run(async (context) => {
+
+    const parts = context.document.customXmlParts;
+
+    parts.load("items");
+    await context.sync();
+
+    const existing = parts.items.find(p =>
+      p.namespaceUri === FORENSICS_NAMESPACE
+    );
+
+    if (!existing) return;
+
+    const xmlResult = existing.getXml();
+    await context.sync();
+
+    const xml = xmlResult.value;
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xml, "text/xml");
+
+    const snapshots = Array.from(doc.getElementsByTagName("Snapshot"));
+    const events = Array.from(doc.getElementsByTagName("PasteEvent"));
+
+    timeline.length = 0;
+    pasteEvents.length = 0;
+
+    snapshots.forEach(s => {
+      timeline.push({
+        time: Number(s.getElementsByTagName("Time")[0]?.textContent || 0),
+        words: Number(s.getElementsByTagName("Words")[0]?.textContent || 0),
+        paragraphCount: Number(s.getElementsByTagName("Paragraphs")[0]?.textContent || 0),
+        text: "",
+        fingerprint: "",
+        wordsAdded: 0,
+        wordsDeleted: 0,
+        typingSpeed: 0,
+        suspicious: false
+      });
+    });
+
+    events.forEach(e => {
+      pasteEvents.push({
+        time: e.getElementsByTagName("Time")[0]?.textContent || "",
+        wordsAdded: Number(e.getElementsByTagName("WordsAdded")[0]?.textContent || 0),
+        seconds: Number(e.getElementsByTagName("Seconds")[0]?.textContent || 0),
+        wordsPerSecond: Number(e.getElementsByTagName("WordsPerSecond")[0]?.textContent || 0),
+        risk: e.getElementsByTagName("Risk")[0]?.textContent || ""
+      });
+    });
+
+    lastSnapshot =
+      timeline.length ? timeline[timeline.length - 1] : null;
+
+  });
+}
+
+
 /**
  * CORE ANALYSIS
  */
 async function silentAnalyze() {
-  await Word.run(async (context) => {
 
-    const paragraphs = context.document.body.paragraphs;
-    paragraphs.load("items/text");
+    await Word.run(async (context) => {
 
-    await context.sync();
+        const paragraphs = context.document.body.paragraphs;
+        paragraphs.load("items/text");
 
-    const texts = paragraphs.items.map(p => p.text);
-    const fullText = texts.join(" ");
+        await context.sync();
 
-    const words = fullText
-      .split(/\s+/)
-      .filter(Boolean).length;
+        const texts = paragraphs.items.map(p => p.text);
 
-    const snapshot: Snapshot = {
-      time: Date.now(),
-      words,
-      paragraphCount: texts.length,
-      text: fullText
-    };
+        const fullText = texts.join(" ");
 
-    // IMPORTANT: ALWAYS RUN DETECTION (no hashing skip)
-    detectPaste(snapshot);
+        const fingerprint = await sha256(fullText);
 
-    timeline.push(snapshot);
+        const words =
+            fullText
+                .split(/\s+/)
+                .filter(Boolean)
+                .length;
 
-    updateDashboard(snapshot);
+        const snapshot: Snapshot = {
 
-    await saveMetadata(snapshot);
-  });
+            time: Date.now(),
+
+            words,
+
+            paragraphCount: texts.length,
+
+            text: fullText,
+
+            fingerprint,
+
+            wordsAdded: 0,
+
+            wordsDeleted: 0,
+
+            typingSpeed: 0,
+
+            suspicious: false
+
+        };
+
+        // Populate wordsAdded, typingSpeed, suspicious etc.
+        detectPaste(snapshot);
+
+        timeline.push(snapshot);
+
+        updateDashboard(snapshot);
+
+        await saveMetadata(snapshot);
+
+    });
+
 }
+
+/**
+ * editing session summary
+ *
+ */
+
+async function sha256(text: string): Promise<string> {
+
+    const encoder = new TextEncoder();
+
+    const data = encoder.encode(text);
+
+    const hashBuffer =
+        await crypto.subtle.digest("SHA-256", data);
+
+    const hashArray =
+        Array.from(new Uint8Array(hashBuffer));
+
+    return hashArray
+        .map(b => b.toString(16).padStart(2,"0"))
+        .join("");
+
+}
+
+
 /**
  * SIMPLE HASH
  */
@@ -111,6 +251,11 @@ function simpleHash(str: string): string {
 function detectPaste(current: Snapshot): void {
 
     if (!lastSnapshot) {
+        current.wordsAdded = 0;
+        current.wordsDeleted = 0;
+        current.typingSpeed = 0;
+        current.suspicious = false;
+
         lastSnapshot = current;
         return;
     }
@@ -129,10 +274,23 @@ function detectPaste(current: Snapshot): void {
     const currentWords =
         current.text.split(/\s+/).filter(Boolean);
 
-    const wordsAdded =
+    const wordDifference =
         currentWords.length - previousWords.length;
 
-    if (wordsAdded <= 0) {
+    // Store statistics inside the snapshot
+    current.wordsAdded =
+        wordDifference > 0 ? wordDifference : 0;
+
+    current.wordsDeleted =
+        wordDifference < 0 ? Math.abs(wordDifference) : 0;
+
+    current.typingSpeed =
+        seconds > 0 ? Math.abs(wordDifference) / seconds : 0;
+
+    current.suspicious = false;
+
+    // Nothing added
+    if (wordDifference <= 0) {
         lastSnapshot = current;
         return;
     }
@@ -141,90 +299,75 @@ function detectPaste(current: Snapshot): void {
         current.text.length - lastSnapshot.text.length;
 
     const wordsPerSecond =
-        wordsAdded / seconds;
+        wordDifference / seconds;
 
     let confidence = "";
     let percentage = 0;
 
-    // ==================================================
-    // RULE 1
-    // Human typing rarely exceeds 3 words/sec.
-    // ==================================================
-
+    // Low confidence
     if (
-        wordsAdded >= 10 &&
+        wordDifference >= 10 &&
         wordsPerSecond >= 3
     ) {
         confidence = "LOW";
         percentage = 60;
     }
 
-    // ==================================================
-    // RULE 2
-    // Very unlikely for a human.
-    // ==================================================
-
+    // Medium confidence
     if (
-        wordsAdded >= 20 &&
+        wordDifference >= 20 &&
         wordsPerSecond >= 5
     ) {
         confidence = "MEDIUM";
         percentage = 75;
     }
 
-    // ==================================================
-    // RULE 3
-    // Strong indication of pasted content.
-    // ==================================================
-
+    // High confidence
     if (
-        wordsAdded >= 40 &&
+        wordDifference >= 40 &&
         wordsPerSecond >= 8
     ) {
         confidence = "HIGH";
         percentage = 90;
     }
 
-    // ==================================================
-    // RULE 4
-    // Massive insertion.
-    // ==================================================
-
+    // Very high confidence
     if (
-        wordsAdded >= 80 ||
+        wordDifference >= 80 ||
         charactersAdded >= 500
     ) {
         confidence = "VERY HIGH";
         percentage = 99;
     }
 
-    if (confidence === "") {
-        lastSnapshot = current;
-        return;
+    if (confidence !== "") {
+
+        current.suspicious = true;
+
+        console.log("=================================");
+        console.log("SUSPICIOUS INSERTION DETECTED");
+        console.log("Words Added:", wordDifference);
+        console.log("Characters Added:", charactersAdded);
+        console.log("Elapsed Seconds:", seconds);
+        console.log("Words / Second:", wordsPerSecond);
+        console.log("Confidence:", confidence);
+        console.log("=================================");
+
+        pasteEvents.push({
+
+            time: new Date(current.time).toLocaleTimeString(),
+
+            wordsAdded: wordDifference,
+
+            seconds,
+
+            wordsPerSecond,
+
+            risk: `${confidence} (${percentage}%)`
+
+        });
+
     }
-
-    console.log("=================================");
-    console.log("SUSPICIOUS INSERTION DETECTED");
-    console.log("Words Added:", wordsAdded);
-    console.log("Characters Added:", charactersAdded);
-    console.log("Elapsed Seconds:", seconds);
-    console.log("Words / Second:", wordsPerSecond);
-    console.log("Confidence:", confidence);
-    console.log("=================================");
-
-    pasteEvents.push({
-
-        time: new Date(current.time).toLocaleTimeString(),
-
-        wordsAdded,
-
-        seconds,
-
-        wordsPerSecond,
-
-        risk: `${confidence} (${percentage}%)`
-
-    });
 
     lastSnapshot = current;
 }
@@ -300,50 +443,63 @@ function calculateRiskScore(): number {
  */
 async function saveMetadata(snapshot: Snapshot) {
 
-    await Word.run(async (context) => {
+  await Word.run(async (context) => {
 
-        const props = context.document.properties.customProperties;
+    const parts = context.document.customXmlParts;
 
-        props.load("items");
+    parts.load("items");
+    await context.sync();
 
-        await context.sync();
+    let part = parts.items.find(p =>
+      p.namespaceUri === FORENSICS_NAMESPACE
+    );
 
-        const forensicData = JSON.stringify({
+    if (!part) {
+      part = parts.add(`
+        <Forensics xmlns="${FORENSICS_NAMESPACE}">
+          <Timeline></Timeline>
+          <PasteEvents></PasteEvents>
+        </Forensics>
+      `);
+      await context.sync();
+    }
 
-            generated: new Date().toISOString(),
+    const xmlResult = part.getXml();
+    await context.sync();
 
-            timeline,
+    let xml = xmlResult.value;
 
-            pasteEvents,
+    // 🔥 SAFE STRING INSERTION (NO DOM APIs)
+    const snapshotXml =
+      `<Snapshot>` +
+      `<Time>${snapshot.time}</Time>` +
+      `<Words>${snapshot.words}</Words>` +
+      `<Paragraphs>${snapshot.paragraphCount}</Paragraphs>` +
+      `</Snapshot>`;
 
-            risk: calculateRiskScore(),
+    xml = xml.replace("</Timeline>", snapshotXml + "</Timeline>");
 
-            snapshots: timeline.length
+    // Add paste event if needed
+    const lastEvent = pasteEvents[pasteEvents.length - 1];
 
-        });
+    if (lastEvent && snapshot.suspicious) {
 
-        let found = false;
+      const eventXml =
+        `<PasteEvent>` +
+        `<Time>${lastEvent.time}</Time>` +
+        `<WordsAdded>${lastEvent.wordsAdded}</WordsAdded>` +
+        `<Seconds>${lastEvent.seconds}</Seconds>` +
+        `<WordsPerSecond>${lastEvent.wordsPerSecond}</WordsPerSecond>` +
+        `<Risk>${lastEvent.risk}</Risk>` +
+        `</PasteEvent>`;
 
-        props.items.forEach(p => {
+      xml = xml.replace("</PasteEvents>", eventXml + "</PasteEvents>");
+    }
 
-            if (p.key === "ForensicsData") {
+    part.setXml(xml);
+    await context.sync();
 
-                p.delete();
-
-                found = true;
-
-            }
-
-        });
-
-        await context.sync();
-
-        props.add("ForensicsData", forensicData);
-
-        await context.sync();
-
-    });
-
+  });
 }
 
 /**
