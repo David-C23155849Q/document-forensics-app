@@ -1,5 +1,9 @@
 /// <reference types="office-js" />
 
+/**
+ * WORD FORENSICS ENGINE
+ */
+
 type Snapshot = {
   time: number;
   words: number;
@@ -7,11 +11,20 @@ type Snapshot = {
   text: string;
 };
 
+type PasteEvent = {
+    time: string;
+    wordsAdded: number;
+    seconds: number;
+    wordsPerSecond: number;
+    risk: string;
+};
+
 const timeline: Snapshot[] = [];
+const pasteEvents: PasteEvent[] = []; 
 
 let lastSnapshot: Snapshot | null = null;
-
-let monitoringInterval: number | null = null;
+let monitoring = false;
+let lastTextHash = "";
 
 /**
  * APP START
@@ -27,9 +40,6 @@ Office.onReady(() => {
 
   startMonitoring();
 
-  document.getElementById("analyze-button")
-    ?.addEventListener("click", analyzeDocument);
-
   document.getElementById("export-btn")
     ?.addEventListener("click", exportReport);
 });
@@ -37,188 +47,408 @@ Office.onReady(() => {
 /**
  * AUTO MONITOR
  */
-function startMonitoring(): void {
-  if (monitoringInterval) return;
+function startMonitoring() {
+  if (monitoring) return;
+  monitoring = true;
 
-  monitoringInterval = window.setInterval(() => {
-    analyzeDocument();
-  }, 3000);
+  setInterval(() => {
+    silentAnalyze();
+  }, 1200);
 }
 
 /**
  * CORE ANALYSIS
  */
-async function analyzeDocument(): Promise<void> {
+async function silentAnalyze() {
   await Word.run(async (context) => {
+
     const paragraphs = context.document.body.paragraphs;
     paragraphs.load("items/text");
 
     await context.sync();
 
-    const items = paragraphs.items;
+    const texts = paragraphs.items.map(p => p.text);
+    const fullText = texts.join(" ");
 
-    const paragraphTexts = items.map(p => p.text);
-
-    const wordsPerParagraph = paragraphTexts.map(p =>
-      p.trim().split(/\s+/).filter(Boolean).length
-    );
-
-    const totalWords = wordsPerParagraph.reduce((a, b) => a + b, 0);
+    const words = fullText
+      .split(/\s+/)
+      .filter(Boolean).length;
 
     const snapshot: Snapshot = {
       time: Date.now(),
-      words: totalWords,
-      paragraphCount: items.length,
-      text: paragraphTexts.join("\n"),
+      words,
+      paragraphCount: texts.length,
+      text: fullText
     };
+
+    // IMPORTANT: ALWAYS RUN DETECTION (no hashing skip)
+    detectPaste(snapshot);
 
     timeline.push(snapshot);
 
-    // =========================
-    // COPY-PASTE DETECTION
-    // =========================
-    const copyPasteHits: string[] = [];
+    updateDashboard(snapshot);
 
-    for (let i = 1; i < wordsPerParagraph.length; i++) {
-      const diff = wordsPerParagraph[i] - wordsPerParagraph[i - 1];
-
-      if (diff > 60) {
-        copyPasteHits.push(`Paragraph ${i + 1} sudden jump (+${diff} words)`);
-      }
-    }
-
-    // =========================
-    // SECTION ANALYSIS
-    // =========================
-    const sections: any[] = [];
-    const chunkSize = 3;
-
-    for (let i = 0; i < wordsPerParagraph.length; i += chunkSize) {
-      const slice = wordsPerParagraph.slice(i, i + chunkSize);
-      const words = slice.reduce((a, b) => a + b, 0);
-
-      const prev =
-        i > 0
-          ? wordsPerParagraph.slice(i - chunkSize, i).reduce((a, b) => a + b, 0)
-          : words;
-
-      const jump = words - prev;
-
-      sections.push({
-        index: sections.length + 1,
-        words,
-        risk: jump > 80 ? 80 : jump > 40 ? 50 : 10,
-      });
-    }
-
-    const estimatedTime = Math.round(totalWords / 200);
-
-    const risk = calculateRiskScore();
-
-    renderReport({
-      words: totalWords,
-      paragraphs: items.length,
-      estimatedTime,
-      copyPasteHits,
-      sections,
-      risk,
-    });
+    await saveMetadata(snapshot);
   });
+}
+/**
+ * SIMPLE HASH
+ */
+function simpleHash(str: string): string {
+  let hash = 0;
+
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+
+  return hash.toString();
+}
+
+/**
+ * PASTE DETECTION
+ */
+function detectPaste(current: Snapshot): void {
+
+    if (!lastSnapshot) {
+        lastSnapshot = current;
+        return;
+    }
+
+    const seconds =
+        (current.time - lastSnapshot.time) / 1000;
+
+    if (seconds <= 0) {
+        lastSnapshot = current;
+        return;
+    }
+
+    const previousWords =
+        lastSnapshot.text.split(/\s+/).filter(Boolean);
+
+    const currentWords =
+        current.text.split(/\s+/).filter(Boolean);
+
+    const wordsAdded =
+        currentWords.length - previousWords.length;
+
+    if (wordsAdded <= 0) {
+        lastSnapshot = current;
+        return;
+    }
+
+    const charactersAdded =
+        current.text.length - lastSnapshot.text.length;
+
+    const wordsPerSecond =
+        wordsAdded / seconds;
+
+    let confidence = "";
+    let percentage = 0;
+
+    // ==================================================
+    // RULE 1
+    // Human typing rarely exceeds 3 words/sec.
+    // ==================================================
+
+    if (
+        wordsAdded >= 10 &&
+        wordsPerSecond >= 3
+    ) {
+        confidence = "LOW";
+        percentage = 60;
+    }
+
+    // ==================================================
+    // RULE 2
+    // Very unlikely for a human.
+    // ==================================================
+
+    if (
+        wordsAdded >= 20 &&
+        wordsPerSecond >= 5
+    ) {
+        confidence = "MEDIUM";
+        percentage = 75;
+    }
+
+    // ==================================================
+    // RULE 3
+    // Strong indication of pasted content.
+    // ==================================================
+
+    if (
+        wordsAdded >= 40 &&
+        wordsPerSecond >= 8
+    ) {
+        confidence = "HIGH";
+        percentage = 90;
+    }
+
+    // ==================================================
+    // RULE 4
+    // Massive insertion.
+    // ==================================================
+
+    if (
+        wordsAdded >= 80 ||
+        charactersAdded >= 500
+    ) {
+        confidence = "VERY HIGH";
+        percentage = 99;
+    }
+
+    if (confidence === "") {
+        lastSnapshot = current;
+        return;
+    }
+
+    console.log("=================================");
+    console.log("SUSPICIOUS INSERTION DETECTED");
+    console.log("Words Added:", wordsAdded);
+    console.log("Characters Added:", charactersAdded);
+    console.log("Elapsed Seconds:", seconds);
+    console.log("Words / Second:", wordsPerSecond);
+    console.log("Confidence:", confidence);
+    console.log("=================================");
+
+    pasteEvents.push({
+
+        time: new Date(current.time).toLocaleTimeString(),
+
+        wordsAdded,
+
+        seconds,
+
+        wordsPerSecond,
+
+        risk: `${confidence} (${percentage}%)`
+
+    });
+
+    lastSnapshot = current;
+}
+
+/**
+ * DASHBOARD
+ */
+function updateDashboard(snapshot: Snapshot) {
+
+  const w = document.getElementById("word-count");
+  if (w) w.textContent = snapshot.words.toString();
+
+  const p = document.getElementById("paragraph-count");
+  if (p) p.textContent = snapshot.paragraphCount.toString();
+
+  const risk = calculateRiskScore();
+
+  const riskBox = document.getElementById("forensic-alert");
+
+  if (riskBox) {
+    if (risk < 30) {
+      riskBox.style.color = "green";
+      riskBox.innerHTML = `🟢 LOW (${risk}/100)`;
+    } else if (risk < 70) {
+      riskBox.style.color = "orange";
+      riskBox.innerHTML = `🟠 MEDIUM (${risk}/100)`;
+    } else {
+      riskBox.style.color = "red";
+      riskBox.innerHTML = `🔴 HIGH (${risk}/100)`;
+    }
+  }
+
+  renderReport(snapshot);
 }
 
 /**
  * RISK SCORE
  */
 function calculateRiskScore(): number {
-  let score = 0;
 
-  for (let i = 1; i < timeline.length; i++) {
-    const prev = timeline[i - 1];
-    const curr = timeline[i];
+    let score = 0;
 
-    const timeDiff = (curr.time - prev.time) / 1000;
-    const wordDiff = curr.words - prev.words;
+    pasteEvents.forEach(event => {
 
-    if (wordDiff > 120 && timeDiff < 10) score += 25;
-    if (Math.abs(curr.paragraphCount - prev.paragraphCount) > 3) score += 15;
+        switch(event.risk){
 
-    const wps = timeDiff > 0 ? wordDiff / timeDiff : 0;
-    if (wps > 8) score += 20;
+            case "LOW":
+                score += 15;
+                break;
 
-    const wordsArray = curr.text.toLowerCase().split(/\s+/);
-    const uniqueRatio =
-      wordsArray.length > 0 ? new Set(wordsArray).size / wordsArray.length : 1;
+            case "MEDIUM":
+                score += 30;
+                break;
 
-    if (uniqueRatio < 0.45 && curr.words > 120) score += 20;
-  }
+            case "HIGH":
+                score += 45;
+                break;
 
-  return Math.min(score, 100);
+            case "VERY HIGH":
+                score += 60;
+                break;
+
+        }
+
+    });
+
+    return Math.min(score,100);
+
 }
 
 /**
- * UI REPORT
+ * METADATA SAVE (IMPORTANT)
  */
-function renderReport(data: any) {
-  let container = document.getElementById("report-container");
+async function saveMetadata(snapshot: Snapshot) {
 
-  if (!container) {
-    container = document.createElement("div");
-    container.id = "report-container";
-    document.getElementById("app-body")?.appendChild(container);
-  }
+    await Word.run(async (context) => {
 
-  container.innerHTML = `
-    <hr/>
-    <h2>📄 Forensic Report</h2>
+        const props = context.document.properties.customProperties;
 
-    <p><b>Words:</b> ${data.words}</p>
-    <p><b>Paragraphs:</b> ${data.paragraphs}</p>
-    <p><b>Estimated Time:</b> ~${data.estimatedTime} min</p>
+        props.load("items");
 
-    <h3>⚠ Copy-Paste Detection</h3>
-    ${
-      data.copyPasteHits.length
-        ? data.copyPasteHits.map((h: string) => `<p style="color:red;">${h}</p>`).join("")
-        : "<p style='color:green;'>No suspicious activity detected</p>"
+        await context.sync();
+
+        const forensicData = JSON.stringify({
+
+            generated: new Date().toISOString(),
+
+            timeline,
+
+            pasteEvents,
+
+            risk: calculateRiskScore(),
+
+            snapshots: timeline.length
+
+        });
+
+        let found = false;
+
+        props.items.forEach(p => {
+
+            if (p.key === "ForensicsData") {
+
+                p.delete();
+
+                found = true;
+
+            }
+
+        });
+
+        await context.sync();
+
+        props.add("ForensicsData", forensicData);
+
+        await context.sync();
+
+    });
+
+}
+
+/**
+ * REPORT
+ */
+function renderReport(snapshot: Snapshot) {
+
+    const container =
+        document.getElementById("report-container")!;
+
+    let html = `
+
+<h2>📄 Forensic Report</h2>
+
+<p><b>Total Words:</b> ${snapshot.words}</p>
+
+<p><b>Paragraphs:</b> ${snapshot.paragraphCount}</p>
+
+<p><b>Snapshots:</b> ${timeline.length}</p>
+
+<hr>
+
+<h3>🚨 Copy-Paste Detection</h3>
+
+`;
+
+    if (pasteEvents.length == 0) {
+
+        html += `
+
+<div style="color:green">
+
+No suspicious paste activity detected.
+
+</div>
+
+`;
+
     }
 
-    <h3>📊 Sections</h3>
-    ${data.sections
-      .map(
-        (s: any) => `
-        <div style="margin-bottom:8px;">
-          <b>Section ${s.index}</b><br/>
-          Words: ${s.words}<br/>
-          Risk: ${s.risk > 50 ? "🔴 High" : "🟢 Low"}
-        </div>
-      `
-      )
-      .join("")}
+    else {
 
-    <h3>🎯 Risk Score</h3>
-    <p style="font-size:18px;">
-      ${data.risk < 30
-        ? "🟢 LOW"
-        : data.risk < 70
-        ? "🟠 MEDIUM"
-        : "🔴 HIGH"
-      } (${data.risk}/100)
-    </p>
-  `;
+        pasteEvents.forEach((event,index)=>{
+
+            html += `
+
+<div style="
+margin-top:10px;
+padding:10px;
+border-left:5px solid red;
+background:#fff5f5">
+
+<b>Paste Event ${index+1}</b><br>
+
+Time:
+${event.time}<br>
+
+Words Added:
+${event.wordsAdded}<br>
+
+Duration:
+${event.seconds.toFixed(2)} sec<br>
+
+Speed:
+${event.wordsPerSecond.toFixed(2)}
+words/sec<br>
+
+Confidence:
+<b style="color:red">${event.risk}</b>
+
+</div>
+
+`;
+
+        });
+
+    }
+
+    html += `
+
+<hr>
+
+<h3>🎯 Overall Risk</h3>
+
+<h2>${calculateRiskScore()}/100</h2>
+
+`;
+
+    container.innerHTML = html;
+
 }
 
 /**
- * EXPORT REPORT
+ * EXPORT JSON
  */
 function exportReport(): void {
+
   const report = {
     generatedAt: new Date().toISOString(),
-    snapshots: timeline.length,
-    risk: calculateRiskScore(),
+    timeline,
+    risk: calculateRiskScore()
   };
 
   const blob = new Blob([JSON.stringify(report, null, 2)], {
-    type: "application/json",
+    type: "application/json"
   });
 
   const url = URL.createObjectURL(blob);
