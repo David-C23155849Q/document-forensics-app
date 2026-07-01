@@ -9,37 +9,126 @@
 
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
 
-  <link rel="stylesheet"
-    href="https://res-1.cdn.office.net/files/fabric-cdn-prod_20230815.002/office-ui-fabric-core/11.1.0/css/fabric.min.css"/>
+  <link rel="stylesheet" href="https://res-1.cdn.office.net/files/fabric-cdn-prod_20230815.002/office-ui-fabric-core/11.1.0/css/fabric.min.css"/>
 
-  <link href="taskpane.css" rel="stylesheet" />
+  <style>
+    body {
+        margin: 0;
+        padding: 20px;
+        background-color: #f8f9fa;
+        color: #323130;
+        font-family: 'Segoe UI', Tahoma, sans-serif;
+    }
+
+    .app-header {
+        margin-bottom: 24px;
+        border-bottom: 1px solid #edebe9;
+        padding-bottom: 8px;
+    }
+
+    .metrics-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin: 20px 0;
+    }
+
+    .metric-card {
+        background: #ffffff;
+        padding: 16px;
+        border-radius: 8px;
+        border: 1px solid #edebe9;
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+
+    .metric-value {
+        font-size: 20px;
+        font-weight: 700;
+        color: #0078d4;
+    }
+
+    .metric-label {
+        font-size: 12px;
+        color: #605e5c;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .ms-Button--primary {
+        width: 100%;
+        background-color: #0078d4 !important;
+        color: white !important;
+        border: none;
+        border-radius: 4px;
+        padding: 10px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.2s;
+    }
+
+    .ms-Button--primary:hover {
+        background-color: #005a9e !important;
+    }
+
+    .report-container {
+        background: #ffffff;
+        padding: 16px;
+        border-radius: 8px;
+        border: 1px solid #edebe9;
+        margin-top: 10px;
+        min-height: 200px;
+    }
+  </style>
 </head>
 
-<body class="ms-font-m ms-Fabric">
+<body class="ms-Fabric">
 
-  <header>
-    <h2>📄 Word Forensics Engine</h2>
+  <header class="app-header">
+    <h2 class="ms-font-l">📄 Word Forensics Engine</h2>
   </header>
 
-  <section id="sideload-msg">
-    <p>Please sideload the add-in</p>
+  <section id="sideload-msg" style="display:none;">
+    <div class="ms-MessageBar ms-MessageBar--warning">
+      <div class="ms-MessageBar-content">Please sideload the add-in to begin.</div>
+    </div>
   </section>
 
   <main id="app-body" style="display:none;">
+    
+    <button id="export-btn" class="ms-Button ms-Button--primary">
+      <span class="ms-Button-label">Export Forensic Report</span>
+    </button>
 
-  
-    <button id="export-btn">Export Report</button>
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <span class="metric-label">Words</span>
+        <div id="word-count" class="metric-value">0</div>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Paragraphs</span>
+        <div id="paragraph-count" class="metric-value">0</div>
+      </div>
+    </div>
 
-    <hr />
-
-    <p><b>Words:</b> <span id="word-count">0</span></p>
-    <p><b>Paragraphs:</b> <span id="paragraph-count">0</span></p>
-
-    <!-- REPORT GOES HERE -->
-    <div id="report-container"></div>
+    <div id="report-container" class="report-container" aria-live="polite">
+      <h3 class="ms-font-m">Analysis Results</h3>
+      <div id="results-content"></div>
+    </div>
 
   </main>
 
-</body>
+  <script>
+    // Initialize the add-in
+    Office.onReady((info) => {
+      if (info.host === Office.HostType.Word) {
+        document.getElementById("app-body").style.display = "block";
+        // Initialize your logic here
+      } else {
+        document.getElementById("sideload-msg").style.display = "block";
+      }
+    });
+  </script>
 
+</body>
 </html>
