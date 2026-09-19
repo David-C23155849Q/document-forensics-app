@@ -149,3 +149,6 @@ word-forensics/
 ├── docker-compose.yml
 └── README.md
 ```
+## Please note:
+
+This project is still under development 
