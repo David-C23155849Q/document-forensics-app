@@ -152,3 +152,5 @@ word-forensics/
 ## Please note:
 
 This project is still under development 
+
+## Guys for those vandaita macontributors dont push anything yet into the project without consulting me and make sure that your commits are easy to understand 
